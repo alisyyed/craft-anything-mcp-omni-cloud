@@ -782,7 +782,7 @@ jobs:
           nohup python3 -u craft_anything_mcp_cloud_launcher.py --port 7860 > /tmp/craft_omni.log 2>&1 &
           echo "Waiting for Cloudflare Quick Tunnel to publish URL..."
           for i in $(seq 1 60); do
-            if grep -q "trycloudflare.com" /tmp/craft_omni.log; then
+            if grep -qE "https://[a-zA-Z0-9-]+\\.trycloudflare\\.com" /tmp/craft_omni.log; then
               BASE_URL=$(grep -oE "https://[a-zA-Z0-9-]+\\.trycloudflare\\.com" /tmp/craft_omni.log | head -n 1)
               MCP_URL="${BASE_URL}/mcp"
               GUI_URL="${BASE_URL}/"
