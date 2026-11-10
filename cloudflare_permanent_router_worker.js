@@ -1,12 +1,12 @@
 /**
- * Craft-Anything v1.3 - Edge-Smart Permanent Cloudflare Worker Router + Hybrid Edge Execution
- * ===========================================================================================
- * Guarantees that Gemini Connected Apps ("Add a custom app link") ALWAYS succeeds in 0ms
- * and executes `craft_doctor_and_status`, `craft_list_all_320_tools`, `web_site_capture`,
- * `core_target_triage`, `craft_study_target`, and `app_ledger_build` at the Cloudflare Edge
- * whenever the background GitHub Cloud Relay is booting or rotating!
+ * Craft-Anything v1.4 - Zero-Cache Edge-Smart Permanent Cloudflare Worker Router
+ * ==============================================================================
+ * Reads LIVE_MCP_URL.json in real time via the GitHub Contents API (0ms cache,
+ * bypassing raw.githubusercontent.com's 5-minute Fastly CDN cache) and executes
+ * fallback tools directly at the Cloudflare Edge if the runner is rotating!
  */
-const GITHUB_LIVE_JSON_URL = "https://raw.githubusercontent.com/alisyyed/craft-anything-mcp-omni-cloud/main/LIVE_MCP_URL.json";
+const GITHUB_API_LIVE_JSON_URL = "https://api.github.com/repos/alisyyed/craft-anything-mcp-omni-cloud/contents/LIVE_MCP_URL.json?ref=main";
+const GITHUB_RAW_LIVE_JSON_URL = "https://raw.githubusercontent.com/alisyyed/craft-anything-mcp-omni-cloud/main/LIVE_MCP_URL.json";
 const GITHUB_DISPATCH_URL = "https://api.github.com/repos/alisyyed/craft-anything-mcp-omni-cloud/actions/workflows/craft_anything_mcp_cloud.yml/dispatches";
 const AUTO_WAKE_GH_TOKEN = "";
 const EDGE_CURATED_TOOLS = [{"name": "craft_doctor_and_status", "description": "[Craft-Anything Omni-Foundry] Run `craft-anything-cli doctor` and return installed version, Clean-Room vs Deep-Mode status, detected engines (Ghidra, Chromium, Rizin, TShark, Apktool), and active cloud relay health.", "inputSchema": {"type": "object", "properties": {}}}, {"name": "craft_list_all_320_tools", "description": "[Craft-Anything Omni-Foundry] Browse or search all 320 tools across the 17 `storytold/craft-anything` toolsets (`core`, `native`, `apple`, `formats`, `managed`, `android`, `java`, `adb`, `browser`, `javascript`, `runtime`, `frida`, `application`, `database`, `projects`, `setup`, `build`).", "inputSchema": {"type": "object", "properties": {"toolset": {"type": "string", "description": "Optional toolset filter (e.g. 'native', 'browser', 'formats', 'android', 'application')."}, "search": {"type": "string", "description": "Optional keyword substring to filter tool names."}}}}, {"name": "craft_call_any_tool", "description": "[Craft-Anything Omni-Foundry] Universal dispatcher that executes ANY of the 320 `storytold/craft-anything` tools by name (via the live `craft-anything-cli mcp` session or CLI subcommand `craft-anything-cli <id-with-dashes>`), automatically switching between Clean-Room and Deep mode.", "inputSchema": {"type": "object", "properties": {"tool_name": {"type": "string", "description": "Exact tool name (e.g. 'core_target_triage', 'native_function_pseudocode', 'web_site_capture', 'game_unity_list', 'js_app_map')."}, "arguments": {"type": "object", "description": "JSON object of tool arguments."}, "deep_mode": {"type": "boolean", "description": "Set true (default) to enable Deep Mode (--deep) for internal code/binary inspection, or false for Clean-Room mode (--clean-room)."}}, "required": ["tool_name"]}}, {"name": "craft_study_target", "description": "[Craft-Anything Omni-Foundry] Open and study any website URL, binary (.exe/.elf/.dll/.sys/.so), Android .apk, Unity/Unreal archive, Electron app.asar, or firmware file. Runs `core_target_open`, `core_target_triage`, and `core_overview_show` and returns structured evidence.", "inputSchema": {"type": "object", "properties": {"target_url_or_path": {"type": "string", "description": "HTTPS URL (website or downloadable file) or cloud path to inspect."}, "deep_mode": {"type": "boolean", "description": "True for Deep Mode (code, binaries, JS, Ghidra), False for Clean-Room visual/DOM inspection."}}, "required": ["target_url_or_path"]}}, {"name": "craft_start_async_rebuild_or_study", "description": "[Craft-Anything Omni-Foundry] Start a long-running `craft-anything-cli rebuild` or deep inspection job asynchronously in the background and return a `job_id` in 0.1s (preventing Gemini's 20s MCP timeout).", "inputSchema": {"type": "object", "properties": {"target": {"type": "string", "description": "Target website URL, file path, or '-' for scratch build."}, "prompt": {"type": "string", "description": "Plain-language rebuild or study specification (e.g. 'Recreate this website in React' or 'A snake game in Rust')."}, "deep_mode": {"type": "boolean", "description": "Enable --deep mode (default true)."}, "rounds": {"type": "integer", "description": "Number of study-build-check refinement rounds (default 1)."}}, "required": ["target", "prompt"]}}, {"name": "craft_poll_async_job", "description": "[Craft-Anything Omni-Foundry] Poll the status, stdout/stderr log stream, `craft.json` state, `checks/` comparison diffs, and `investigation.cany` evidence of an asynchronous job started with `craft_start_async_rebuild_or_study`.", "inputSchema": {"type": "object", "properties": {"job_id": {"type": "string", "description": "Job ID returned by `craft_start_async_rebuild_or_study`."}}, "required": ["job_id"]}}, {"name": "core_target_triage", "description": "[Craft-Anything Core] Identify a target file, app bundle, archive, or URL (architecture, format, compiler/runtime, packing, and recommended inspection tools).", "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "description": "Path or URL to target."}}, "required": ["path"]}}, {"name": "native_function_pseudocode", "description": "[Craft-Anything Native] Decompile a function at a given name or address into readable pseudo-C using Craft Anything's built-in pure-Rust decompiler (and Ghidra when present).", "inputSchema": {"type": "object", "properties": {"target": {"type": "string", "description": "Target binary path."}, "function": {"type": "string", "description": "Function name or hex address."}}, "required": ["function"]}}, {"name": "web_site_capture", "description": "[Craft-Anything Browser] Capture a live website across multiple viewport widths (mobile, tablet, desktop), recording computed styles, colors, typography, layout metrics, and interactive states for clean-room rebuilding.", "inputSchema": {"type": "object", "properties": {"url": {"type": "string", "description": "Website URL to capture."}}, "required": ["url"]}}, {"name": "app_ledger_build", "description": "[Craft-Anything Application] Build a structured rebuild ledger mapping every observed feature, screen, route, and function of the original target against the new implementation.", "inputSchema": {"type": "object", "properties": {"project_folder": {"type": "string", "description": "Optional project folder path."}}}}];
@@ -20,7 +20,7 @@ async function triggerGithubAutoWake() {
       headers: {
         "Authorization": "Bearer " + AUTO_WAKE_GH_TOKEN,
         "Accept": "application/vnd.github+json",
-        "User-Agent": "CraftAnything-Permanent-Router/1.3",
+        "User-Agent": "CraftAnything-Permanent-Router/1.4",
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ ref: "main" })
@@ -32,8 +32,23 @@ async function triggerGithubAutoWake() {
 }
 
 async function getLatestTunnelUrl() {
-  const res = await fetch(GITHUB_LIVE_JSON_URL + "?t=" + Date.now(), {
-    headers: { "User-Agent": "CraftAnything-Permanent-Router/1.3" }
+  if (AUTO_WAKE_GH_TOKEN) {
+    try {
+      const apiRes = await fetch(GITHUB_API_LIVE_JSON_URL + "&t=" + Date.now(), {
+        headers: {
+          "Authorization": "Bearer " + AUTO_WAKE_GH_TOKEN,
+          "Accept": "application/vnd.github.raw+json",
+          "User-Agent": "CraftAnything-Permanent-Router/1.4",
+          "X-GitHub-Api-Version": "2022-11-28"
+        }
+      });
+      if (apiRes.ok) {
+        return await apiRes.json();
+      }
+    } catch (_) {}
+  }
+  const res = await fetch(GITHUB_RAW_LIVE_JSON_URL + "?t=" + Date.now(), {
+    headers: { "User-Agent": "CraftAnything-Permanent-Router/1.4" }
   });
   if (!res.ok) throw new Error("Could not fetch LIVE_MCP_URL.json: HTTP " + res.status);
   return await res.json();
@@ -42,7 +57,7 @@ async function getLatestTunnelUrl() {
 async function inspectUrlAtEdge(targetUrl) {
   try {
     const res = await fetch(targetUrl, {
-      headers: { "User-Agent": "CraftAnything-OmniFoundry/1.3 (Edge-Inspector)" }
+      headers: { "User-Agent": "CraftAnything-OmniFoundry/1.4 (Edge-Inspector)" }
     });
     const contentType = res.headers.get("content-type") || "";
     const text = await res.text();
@@ -75,7 +90,7 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {
       result: {
         protocolVersion: "2025-03-26",
         capabilities: { tools: { listChanged: true } },
-        serverInfo: { name: "CraftAnything-OmniFoundry", version: "1.3.0" }
+        serverInfo: { name: "CraftAnything-OmniFoundry", version: "1.4.0" }
       }
     };
   }
@@ -123,14 +138,13 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {
             type: "text",
             text: JSON.stringify({
               status: "LIVE_EDGE_AND_CLOUD_HYBRID",
-              router_version: "Craft-Anything v1.3 Edge-Smart Router",
+              router_version: "Craft-Anything v1.4 Zero-Cache Edge-Smart Router",
               engine: "storytold/craft-anything v0.6.0 (Pure-Rust 320-Tool Engine)",
               deep_mode_enabled: true,
               total_toolsets: 17,
               total_engine_tools: 302,
               total_mcp_tools: 320,
-              backend_relay_state: liveData || { status: "ROTATING_OR_WAKING", detail: String(upstreamErr || "") },
-              note: "Edge router is 100% online. If backend_relay_state.mcp_url is empty or '/mcp', run `python3 craft_anything_mcp_cloud_launcher.py --forever` (v1.3) once to publish the verified https://*.trycloudflare.com/mcp tunnel URL."
+              backend_relay_state: liveData || { status: "ROTATING_OR_WAKING", detail: String(upstreamErr || "") }
             }, null, 2)
           }]
         }
@@ -148,7 +162,7 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {
             type: "text",
             text: JSON.stringify({
               tool: tName,
-              execution_layer: "Cloudflare-Edge-Inspector (v1.3)",
+              execution_layer: "Cloudflare-Edge-Inspector (v1.4)",
               inspection: edgeReport
             }, null, 2)
           }]
@@ -165,7 +179,7 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {
             type: "text",
             text: JSON.stringify({
               tool: "app_ledger_build",
-              execution_layer: "Cloudflare-Edge-Inspector (v1.3)",
+              execution_layer: "Cloudflare-Edge-Inspector (v1.4)",
               ledger: {
                 target: tArgs.target || "target",
                 phase: "study-build-check-ready",
@@ -244,7 +258,7 @@ export default {
 
       if (request.method === "GET" && (url.pathname === "/status" || url.pathname === "/router-status")) {
         return new Response(JSON.stringify({
-          router: "Craft-Anything v1.3 Edge-Smart Permanent Router",
+          router: "Craft-Anything v1.4 Zero-Cache Edge-Smart Router",
           active_backend_mcp_url: live.mcp_url,
           active_backend_gui_url: live.gui_url,
           updated_at: live.updated_at
@@ -277,7 +291,7 @@ export default {
       }
       return new Response(JSON.stringify({
         status: "AUTO_WAKING_CLOUD_RELAY",
-        router: "Craft-Anything v1.3 Edge-Smart Permanent Router",
+        router: "Craft-Anything v1.4 Zero-Cache Edge-Smart Router",
         engine: "storytold/craft-anything v0.6.0 (320 tools)",
         live_json_state: live,
         message: "Signaled your 24/7 Craft-Anything GitHub Cloud Relay to wake (~30s).",
