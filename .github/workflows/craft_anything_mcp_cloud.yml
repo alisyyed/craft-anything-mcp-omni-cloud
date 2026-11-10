@@ -23,36 +23,41 @@ jobs:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Boot Craft-Anything Cloud MCP Tunnel First & Publish LIVE_MCP_URL.json (~15s)
+      - name: 2. Boot Craft-Anything 24/7 Cloud MCP Server, Publish LIVE_MCP_URL.json & Keep Alive (5h Window)
+        env:
+          RUNNER_TRACKING_ID: ""
         run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 binutils unzip curl || true
           rm -f /tmp/LIVE_MCP_URL.json
           nohup python3 -u craft_anything_mcp_cloud_launcher.py --port 7860 > /tmp/craft_omni.log 2>&1 &
           echo "Waiting for Python launcher to write verified https://*.trycloudflare.com URL to /tmp/LIVE_MCP_URL.json..."
+          PUBLISHED=0
           for i in $(seq 1 60); do
             if [ -s /tmp/LIVE_MCP_URL.json ] && grep -q "https://" /tmp/LIVE_MCP_URL.json; then
-              cp /tmp/LIVE_MCP_URL.json LIVE_MCP_URL.json
-              cat LIVE_MCP_URL.json
               git config user.name "craft-anything-cloud-bot"
               git config user.email "bot@users.noreply.github.com"
+              git fetch origin main || true
+              git checkout -B main origin/main || true
+              cp /tmp/LIVE_MCP_URL.json LIVE_MCP_URL.json
+              cat LIVE_MCP_URL.json
               git add LIVE_MCP_URL.json
               git commit -m "Auto-update LIVE_MCP_URL.json [skip ci]" || true
-              git push || true
+              git push origin main --force || true
+              PUBLISHED=1
               break
             fi
             sleep 2
           done
           cat /tmp/craft_omni.log
-
-      - name: 3. Install Optional Companion Packages Non-Interactively in Background
-        run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 binutils unzip curl || true
-
-      - name: 4. Keep Server Online (5-Hour Relay Window)
-        run: |
+          if [ "$PUBLISHED" -eq 0 ]; then
+            echo "ERROR: Cloudflare Quick Tunnel did not publish URL within 120s"
+            exit 1
+          fi
+          echo "Craft-Anything 24/7 Cloud MCP Relay is LIVE! Holding tunnel open for 5 hours..."
           sleep 18000
 
-      - name: 5. Perpetual Self-Respawn
+      - name: 3. Perpetual Self-Respawn
         if: success() || failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
