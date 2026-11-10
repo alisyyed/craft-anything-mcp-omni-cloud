@@ -1,0 +1,65 @@
+name: Craft-Anything 24/7 Perpetual Cloud MCP Relay
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '25 */5 * * *'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: craft-anything-perpetual-relay
+  cancel-in-progress: false
+
+jobs:
+  craft-anything-cloud:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Install Companion Inspection Tools (Chromium, Rizin, TShark, Sqlite3)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq chromium-browser tshark sqlite3 binutils unzip curl || true
+
+      - name: 3. Boot Craft-Anything 24/7 Cloud MCP Server & Publish LIVE_MCP_URL.json
+        run: |
+          nohup python3 craft_anything_mcp_cloud_launcher.py --port 7860 > /tmp/craft_omni.log 2>&1 &
+          echo "Waiting for Craft Anything v0.6.0 + Cloudflare Tunnel to publish URL..."
+          for i in $(seq 1 90); do
+            if grep -q "trycloudflare.com" /tmp/craft_omni.log; then
+              BASE_URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/craft_omni.log | head -n 1)
+              MCP_URL="${BASE_URL}/mcp"
+              GUI_URL="${BASE_URL}/"
+              printf '{"status":"LIVE","engine":"storytold/craft-anything","mcp_url":"%s","gui_url":"%s","updated_at":"%s"}\n' "$MCP_URL" "$GUI_URL" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > LIVE_MCP_URL.json
+              git config user.name "craft-anything-cloud-bot"
+              git config user.email "bot@users.noreply.github.com"
+              git add LIVE_MCP_URL.json
+              git commit -m "Auto-update LIVE_MCP_URL.json [skip ci]" || true
+              git push || true
+              break
+            fi
+            sleep 3
+          done
+          cat /tmp/craft_omni.log
+
+      - name: 4. Keep Server Online (5-Hour Relay Window)
+        run: |
+          sleep 18000
+
+      - name: 5. Perpetual Self-Respawn
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/craft_anything_mcp_cloud.yml/dispatches" \
+            -d '{"ref":"main"}' || true
