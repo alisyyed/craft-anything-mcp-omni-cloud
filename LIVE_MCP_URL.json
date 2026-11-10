@@ -1,7 +1,7 @@
 {
-  "status": "BOOTING",
+  "status": "LIVE",
   "engine": "storytold/craft-anything",
-  "mcp_url": "",
-  "gui_url": "",
-  "updated_at": "2026-11-10T23:13:14Z"
+  "mcp_url": "https://tests-cad-robert-crm.trycloudflare.com/mcp",
+  "gui_url": "https://tests-cad-robert-crm.trycloudflare.com/",
+  "updated_at": "2026-11-10T23:13:51Z"
 }
