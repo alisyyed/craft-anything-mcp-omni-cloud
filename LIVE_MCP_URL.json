@@ -1,7 +1,7 @@
 {
-  "status": "BOOTING",
+  "status": "LIVE",
   "engine": "storytold/craft-anything",
-  "mcp_url": "",
-  "gui_url": "",
-  "updated_at": "2026-11-10T23:23:50Z"
+  "mcp_url": "https://answers-grain-consolidation-ricky.trycloudflare.com/mcp",
+  "gui_url": "https://answers-grain-consolidation-ricky.trycloudflare.com/",
+  "updated_at": "2026-11-10T23:24:28Z"
 }
