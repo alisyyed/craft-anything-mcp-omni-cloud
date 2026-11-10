@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-CRAFT-ANYTHING v1.3 OMNI-FOUNDRY - 24/7 CLOUD MCP SERVER & AUTO-PROVISIONER
+CRAFT-ANYTHING v1.4 OMNI-FOUNDRY - 24/7 CLOUD MCP SERVER & AUTO-PROVISIONER
 ================================================================================
 Turns `storytold/craft-anything` (v0.6.0+, Pure-Rust 320-Tool Software Inspection,
 Reverse-Engineering & Clean-Room Rebuild Engine) into a 100% Free, 24/7 Set-and-Forget
 Remote MCP Server for Gemini Connected Apps!
 
-WHAT IS FIXED IN v1.3:
+WHAT IS FIXED IN v1.4:
   1. INSTANT 0ms GEMINI CONNECTED APPS HANDSHAKE IN THE CLOUDFLARE WORKER:
      The Cloudflare Worker router (`craft-anything-mcp-forever.forested-lung.workers.dev/mcp`)
      now embeds full JSON-RPC 2.0 handlers for `initialize`, `notifications/initialized`,
@@ -533,7 +533,7 @@ class CraftAnythingEngineBridge:
                 "params": {
                     "protocolVersion": "2025-03-26",
                     "capabilities": {},
-                    "clientInfo": {"name": "CraftAnything-Cloud-Bridge", "version": "1.3.0"},
+                    "clientInfo": {"name": "CraftAnything-Cloud-Bridge", "version": "1.4.0"},
                 },
             })
             if self.mcp_proc.stdin and self.mcp_proc.stdout:
@@ -777,36 +777,41 @@ jobs:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Boot Craft-Anything Cloud MCP Tunnel First & Publish LIVE_MCP_URL.json (~15s)
+      - name: 2. Boot Craft-Anything 24/7 Cloud MCP Server, Publish LIVE_MCP_URL.json & Keep Alive (5h Window)
+        env:
+          RUNNER_TRACKING_ID: ""
         run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 binutils unzip curl || true
           rm -f /tmp/LIVE_MCP_URL.json
           nohup python3 -u craft_anything_mcp_cloud_launcher.py --port 7860 > /tmp/craft_omni.log 2>&1 &
           echo "Waiting for Python launcher to write verified https://*.trycloudflare.com URL to /tmp/LIVE_MCP_URL.json..."
+          PUBLISHED=0
           for i in $(seq 1 60); do
             if [ -s /tmp/LIVE_MCP_URL.json ] && grep -q "https://" /tmp/LIVE_MCP_URL.json; then
-              cp /tmp/LIVE_MCP_URL.json LIVE_MCP_URL.json
-              cat LIVE_MCP_URL.json
               git config user.name "craft-anything-cloud-bot"
               git config user.email "bot@users.noreply.github.com"
+              git fetch origin main || true
+              git checkout -B main origin/main || true
+              cp /tmp/LIVE_MCP_URL.json LIVE_MCP_URL.json
+              cat LIVE_MCP_URL.json
               git add LIVE_MCP_URL.json
               git commit -m "Auto-update LIVE_MCP_URL.json [skip ci]" || true
-              git push || true
+              git push origin main --force || true
+              PUBLISHED=1
               break
             fi
             sleep 2
           done
           cat /tmp/craft_omni.log
-
-      - name: 3. Install Optional Companion Packages Non-Interactively in Background
-        run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 binutils unzip curl || true
-
-      - name: 4. Keep Server Online (5-Hour Relay Window)
-        run: |
+          if [ "$PUBLISHED" -eq 0 ]; then
+            echo "ERROR: Cloudflare Quick Tunnel did not publish URL within 120s"
+            exit 1
+          fi
+          echo "Craft-Anything 24/7 Cloud MCP Relay is LIVE! Holding tunnel open for 5 hours..."
           sleep 18000
 
-      - name: 5. Perpetual Self-Respawn
+      - name: 3. Perpetual Self-Respawn
         if: success() || failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -824,20 +829,21 @@ def build_permanent_cloudflare_worker_js(
     repo_name: str = "craft-anything-mcp-omni-cloud",
     gh_token_for_autowake: str = "",
 ) -> str:
+    api_json_url = f"https://api.github.com/repos/{github_username}/{repo_name}/contents/LIVE_MCP_URL.json?ref=main"
     raw_json_url = f"https://raw.githubusercontent.com/{github_username}/{repo_name}/main/LIVE_MCP_URL.json"
     dispatch_url = f"https://api.github.com/repos/{github_username}/{repo_name}/actions/workflows/craft_anything_mcp_cloud.yml/dispatches"
     tools_json_str = json.dumps(DIRECT_CURATED_TOOLS)
     toolsets_json_str = json.dumps(CRAFT_TOOLSETS)
 
     return f"""/**
- * Craft-Anything v1.3 - Edge-Smart Permanent Cloudflare Worker Router + Hybrid Edge Execution
- * ===========================================================================================
- * Guarantees that Gemini Connected Apps ("Add a custom app link") ALWAYS succeeds in 0ms
- * and executes `craft_doctor_and_status`, `craft_list_all_320_tools`, `web_site_capture`,
- * `core_target_triage`, `craft_study_target`, and `app_ledger_build` at the Cloudflare Edge
- * whenever the background GitHub Cloud Relay is booting or rotating!
+ * Craft-Anything v1.4 - Zero-Cache Edge-Smart Permanent Cloudflare Worker Router
+ * ==============================================================================
+ * Reads LIVE_MCP_URL.json in real time via the GitHub Contents API (0ms cache,
+ * bypassing raw.githubusercontent.com's 5-minute Fastly CDN cache) and executes
+ * fallback tools directly at the Cloudflare Edge if the runner is rotating!
  */
-const GITHUB_LIVE_JSON_URL = "{raw_json_url}";
+const GITHUB_API_LIVE_JSON_URL = "{api_json_url}";
+const GITHUB_RAW_LIVE_JSON_URL = "{raw_json_url}";
 const GITHUB_DISPATCH_URL = "{dispatch_url}";
 const AUTO_WAKE_GH_TOKEN = "{gh_token_for_autowake}";
 const EDGE_CURATED_TOOLS = {tools_json_str};
@@ -851,7 +857,7 @@ async function triggerGithubAutoWake() {{
       headers: {{
         "Authorization": "Bearer " + AUTO_WAKE_GH_TOKEN,
         "Accept": "application/vnd.github+json",
-        "User-Agent": "CraftAnything-Permanent-Router/1.3",
+        "User-Agent": "CraftAnything-Permanent-Router/1.4",
         "Content-Type": "application/json"
       }},
       body: JSON.stringify({{ ref: "main" }})
@@ -863,8 +869,23 @@ async function triggerGithubAutoWake() {{
 }}
 
 async function getLatestTunnelUrl() {{
-  const res = await fetch(GITHUB_LIVE_JSON_URL + "?t=" + Date.now(), {{
-    headers: {{ "User-Agent": "CraftAnything-Permanent-Router/1.3" }}
+  if (AUTO_WAKE_GH_TOKEN) {{
+    try {{
+      const apiRes = await fetch(GITHUB_API_LIVE_JSON_URL + "&t=" + Date.now(), {{
+        headers: {{
+          "Authorization": "Bearer " + AUTO_WAKE_GH_TOKEN,
+          "Accept": "application/vnd.github.raw+json",
+          "User-Agent": "CraftAnything-Permanent-Router/1.4",
+          "X-GitHub-Api-Version": "2022-11-28"
+        }}
+      }});
+      if (apiRes.ok) {{
+        return await apiRes.json();
+      }}
+    }} catch (_) {{}}
+  }}
+  const res = await fetch(GITHUB_RAW_LIVE_JSON_URL + "?t=" + Date.now(), {{
+    headers: {{ "User-Agent": "CraftAnything-Permanent-Router/1.4" }}
   }});
   if (!res.ok) throw new Error("Could not fetch LIVE_MCP_URL.json: HTTP " + res.status);
   return await res.json();
@@ -873,12 +894,12 @@ async function getLatestTunnelUrl() {{
 async function inspectUrlAtEdge(targetUrl) {{
   try {{
     const res = await fetch(targetUrl, {{
-      headers: {{ "User-Agent": "CraftAnything-OmniFoundry/1.3 (Edge-Inspector)" }}
+      headers: {{ "User-Agent": "CraftAnything-OmniFoundry/1.4 (Edge-Inspector)" }}
     }});
     const contentType = res.headers.get("content-type") || "";
     const text = await res.text();
-    const titleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    const headings = [...text.matchAll(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi)].slice(0, 12).map(m => m[1].replace(/<[^>]+>/g, "").trim());
+    const titleMatch = text.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i);
+    const headings = [...text.matchAll(/<h[1-3][^>]*>([\\s\\S]*?)<\\/h[1-3]>/gi)].slice(0, 12).map(m => m[1].replace(/<[^>]+>/g, "").trim());
     const links = [...text.matchAll(/href=["']([^"']+)["']/gi)].slice(0, 20).map(m => m[1]);
     return {{
       target_url: targetUrl,
@@ -906,7 +927,7 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {{
       result: {{
         protocolVersion: "2025-03-26",
         capabilities: {{ tools: {{ listChanged: true }} }},
-        serverInfo: {{ name: "CraftAnything-OmniFoundry", version: "1.3.0" }}
+        serverInfo: {{ name: "CraftAnything-OmniFoundry", version: "1.4.0" }}
       }}
     }};
   }}
@@ -954,14 +975,13 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {{
             type: "text",
             text: JSON.stringify({{
               status: "LIVE_EDGE_AND_CLOUD_HYBRID",
-              router_version: "Craft-Anything v1.3 Edge-Smart Router",
+              router_version: "Craft-Anything v1.4 Zero-Cache Edge-Smart Router",
               engine: "storytold/craft-anything v0.6.0 (Pure-Rust 320-Tool Engine)",
               deep_mode_enabled: true,
               total_toolsets: 17,
               total_engine_tools: 302,
               total_mcp_tools: 320,
-              backend_relay_state: liveData || {{ status: "ROTATING_OR_WAKING", detail: String(upstreamErr || "") }},
-              note: "Edge router is 100% online. If backend_relay_state.mcp_url is empty or '/mcp', run `python3 craft_anything_mcp_cloud_launcher.py --forever` (v1.3) once to publish the verified https://*.trycloudflare.com/mcp tunnel URL."
+              backend_relay_state: liveData || {{ status: "ROTATING_OR_WAKING", detail: String(upstreamErr || "") }}
             }}, null, 2)
           }}]
         }}
@@ -979,7 +999,7 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {{
             type: "text",
             text: JSON.stringify({{
               tool: tName,
-              execution_layer: "Cloudflare-Edge-Inspector (v1.3)",
+              execution_layer: "Cloudflare-Edge-Inspector (v1.4)",
               inspection: edgeReport
             }}, null, 2)
           }}]
@@ -996,7 +1016,7 @@ async function handleEdgeFallbackJsonRpc(body, upstreamErr, liveData) {{
             type: "text",
             text: JSON.stringify({{
               tool: "app_ledger_build",
-              execution_layer: "Cloudflare-Edge-Inspector (v1.3)",
+              execution_layer: "Cloudflare-Edge-Inspector (v1.4)",
               ledger: {{
                 target: tArgs.target || "target",
                 phase: "study-build-check-ready",
@@ -1070,12 +1090,12 @@ export default {{
       if (!mcpUrl.startsWith("https://")) {{
         throw new Error("LIVE_MCP_URL.json mcp_url is not a full https:// URL yet: " + JSON.stringify(mcpUrl));
       }}
-      const targetBase = (live.gui_url && String(live.gui_url).startsWith("https://") ? live.gui_url : mcpUrl.replace(/\/mcp$/, "")).replace(/\/$/, "");
+      const targetBase = (live.gui_url && String(live.gui_url).startsWith("https://") ? live.gui_url : mcpUrl.replace(/\\/mcp$/, "")).replace(/\\/$/, "");
       const targetUrl = targetBase + url.pathname + url.search;
 
       if (request.method === "GET" && (url.pathname === "/status" || url.pathname === "/router-status")) {{
         return new Response(JSON.stringify({{
-          router: "Craft-Anything v1.3 Edge-Smart Permanent Router",
+          router: "Craft-Anything v1.4 Zero-Cache Edge-Smart Router",
           active_backend_mcp_url: live.mcp_url,
           active_backend_gui_url: live.gui_url,
           updated_at: live.updated_at
@@ -1108,7 +1128,7 @@ export default {{
       }}
       return new Response(JSON.stringify({{
         status: "AUTO_WAKING_CLOUD_RELAY",
-        router: "Craft-Anything v1.3 Edge-Smart Permanent Router",
+        router: "Craft-Anything v1.4 Zero-Cache Edge-Smart Router",
         engine: "storytold/craft-anything v0.6.0 (320 tools)",
         live_json_state: live,
         message: "Signaled your 24/7 Craft-Anything GitHub Cloud Relay to wake (~30s).",
@@ -1175,7 +1195,7 @@ def deploy_to_github_cloud_api(gh_token: str, repo_name: str = "craft-anything-m
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
-        "User-Agent": "CraftAnything-OmniFoundry/1.2",
+        "User-Agent": "CraftAnything-OmniFoundry/1.4",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:
@@ -1185,7 +1205,7 @@ def deploy_to_github_cloud_api(gh_token: str, repo_name: str = "craft-anything-m
 
         create_payload = json.dumps({
             "name": repo_name,
-            "description": "Craft-Anything v1.3 Omni-Foundry - 24/7 Cloud MCP Server",
+            "description": "Craft-Anything v1.4 Omni-Foundry - 24/7 Cloud MCP Server",
             "private": False,
             "auto_init": True,
         }).encode("utf-8")
@@ -1241,11 +1261,11 @@ def deploy_to_github_cloud_api(gh_token: str, repo_name: str = "craft-anything-m
         }, indent=2) + "\n"
         _put_file("LIVE_MCP_URL.json", boot_json, "Reset LIVE_MCP_URL.json for fresh tunnel boot [skip ci]")
         launcher_source = Path(__file__).resolve().read_text(encoding="utf-8")
-        _put_file("craft_anything_mcp_cloud_launcher.py", launcher_source, "Deploy Craft-Anything v1.3 Omni-Foundry [skip ci]")
-        _put_file("cloudflare_permanent_router_worker.js", build_permanent_cloudflare_worker_js(username, repo_name), "Add Edge-Smart v1.3 Permanent Router [skip ci]")
-        _put_file(".github/workflows/craft_anything_mcp_cloud.yml", GITHUB_WORKFLOW_YML, "Add 24/7 Fast-Tunnel Craft-Anything Cloud Relay v1.3 [skip ci]")
+        _put_file("craft_anything_mcp_cloud_launcher.py", launcher_source, "Deploy Craft-Anything v1.4 Omni-Foundry [skip ci]")
+        _put_file("cloudflare_permanent_router_worker.js", build_permanent_cloudflare_worker_js(username, repo_name), "Add Edge-Smart v1.4 Permanent Router [skip ci]")
+        # Do NOT put [skip ci] on the workflow push so GitHub Actions never skips the branch head!
+        _put_file(".github/workflows/craft_anything_mcp_cloud.yml", GITHUB_WORKFLOW_YML, "Launch 24/7 Fast-Tunnel Craft-Anything Cloud Relay v1.4")
 
-        # Trigger one clean workflow_dispatch run now that all files are committed
         try:
             disp_url = f"https://api.github.com/repos/{username}/{repo_name}/actions/workflows/craft_anything_mcp_cloud.yml/dispatches"
             disp_req = urllib.request.Request(disp_url, data=json.dumps({"ref": "main"}).encode("utf-8"), headers=headers, method="POST")
@@ -1257,6 +1277,7 @@ def deploy_to_github_cloud_api(gh_token: str, repo_name: str = "craft-anything-m
             "status": "DEPLOYED_GITHUB_CLOUD",
             "username": username,
             "repo_name": repo_name,
+            "api_live_url": f"https://api.github.com/repos/{username}/{repo_name}/contents/LIVE_MCP_URL.json?ref=main",
             "raw_live_url": f"https://raw.githubusercontent.com/{username}/{repo_name}/main/LIVE_MCP_URL.json",
             "github_repo": f"https://github.com/{username}/{repo_name}",
             "github_actions_url": f"https://github.com/{username}/{repo_name}/actions",
@@ -1281,10 +1302,22 @@ def deploy_cloudflare_worker_automatically(
     w_dir = work_dir / "cf_craft_forever_worker"
     w_dir.mkdir(parents=True, exist_ok=True)
     (w_dir / "worker.js").write_text(worker_js, encoding="utf-8")
-    (w_dir / "wrangler.toml").write_text(
-        f'name = "{worker_name}"\nmain = "worker.js"\ncompatibility_date = "2026-01-01"\nworkers_dev = true\n',
-        encoding="utf-8",
-    )
+
+    # Preserve existing account_id if already resolved on a prior run
+    existing_toml = (w_dir / "wrangler.toml").read_text(encoding="utf-8") if (w_dir / "wrangler.toml").exists() else ""
+    saved_acct_match = re.search(r'account_id\s*=\s*"([0-9a-fA-F]{32})"', existing_toml)
+    saved_acct_id = saved_acct_match.group(1) if saved_acct_match else ""
+
+    if saved_acct_id:
+        (w_dir / "wrangler.toml").write_text(
+            f'name = "{worker_name}"\naccount_id = "{saved_acct_id}"\nmain = "worker.js"\ncompatibility_date = "2026-01-01"\nworkers_dev = true\n',
+            encoding="utf-8",
+        )
+    else:
+        (w_dir / "wrangler.toml").write_text(
+            f'name = "{worker_name}"\nmain = "worker.js"\ncompatibility_date = "2026-01-01"\nworkers_dev = true\n',
+            encoding="utf-8",
+        )
 
     print("[+] Deploying Edge-Smart Craft-Anything Router Worker via `npx --yes wrangler@latest deploy`...")
     proc = subprocess.Popen(
@@ -1345,7 +1378,7 @@ def deploy_cloudflare_worker_automatically(
         return {
             "status": "DEPLOYED_PERMANENT_WORKER",
             "permanent_mcp_url": deployed_url,
-            "method": "Wrangler Auto-Deploy (Edge-Smart v1.3)",
+            "method": "Wrangler Auto-Deploy (Zero-Cache Edge-Smart v1.4)",
         }
     return {"status": "WRANGLER_ERROR", "logs": "".join(output_lines[-15:])}
 
@@ -1369,7 +1402,7 @@ def run_forever_provisioner(work_dir: Path, gh_token_input: str = "") -> Dict[st
     if gh_res.get("status") != "DEPLOYED_GITHUB_CLOUD":
         return gh_res
 
-    print("[+] Step 2/3: Deploying Edge-Smart Permanent Front-Door Cloudflare Worker Router...")
+    print("[+] Step 2/3: Deploying Zero-Cache Edge-Smart Permanent Front-Door Cloudflare Worker Router...")
     cf_res = deploy_cloudflare_worker_automatically(
         work_dir=work_dir,
         github_username=gh_res["username"],
@@ -1377,12 +1410,19 @@ def run_forever_provisioner(work_dir: Path, gh_token_input: str = "") -> Dict[st
         gh_token=gh_token,
     )
 
-    print("[+] Step 3/3: Waiting for your 24/7 Craft-Anything Cloud Relay runner to publish LIVE_MCP_URL.json (~25-60s)...")
+    print("[+] Step 3/3: Polling GitHub Contents API (0-cache real-time) for LIVE_MCP_URL.json (~25-60s)...")
     live_tunnel_mcp = ""
+    api_live_url = gh_res["api_live_url"]
     raw_live_url = gh_res["raw_live_url"]
-    for elapsed in range(0, 75, 5):
+    api_headers = {
+        "Authorization": f"Bearer {gh_token}",
+        "Accept": "application/vnd.github.raw+json",
+        "User-Agent": "CraftAnything-AutoProvisioner/1.4",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    for elapsed in range(0, 95, 5):
         try:
-            req = urllib.request.Request(f"{raw_live_url}?t={int(time.time())}", headers={"User-Agent": "CraftAnything-AutoProvisioner/1.2"})
+            req = urllib.request.Request(f"{api_live_url}&t={int(time.time())}", headers=api_headers)
             with urllib.request.urlopen(req, timeout=6) as r:
                 live_data = json.loads(r.read().decode("utf-8"))
                 candidate_url = str(live_data.get("mcp_url") or "").strip()
@@ -1406,7 +1446,7 @@ def run_forever_provisioner(work_dir: Path, gh_token_input: str = "") -> Dict[st
         "active_relay_tunnel_mcp_url": live_tunnel_mcp or "Edge Worker is LIVE now (GitHub runner finishes in ~20s)",
         "cloudflare_worker_result": cf_res,
         "final_gemini_mcp_url": final_url,
-        "instructions": "DONE! Paste `final_gemini_mcp_url` into Gemini -> Settings -> Connected Apps -> Add a custom app link! (Edge-Smart v1.3 connects in 0ms even while the background runner boots!)",
+        "instructions": "DONE! Your permanent URL is LIVE and wired to real-time 0-cache GitHub Contents API!",
     }
 
 
@@ -1426,7 +1466,7 @@ def handle_mcp_jsonrpc(bridge: CraftAnythingEngineBridge, body: Dict[str, Any]) 
             "result": {
                 "protocolVersion": "2025-03-26",
                 "capabilities": {"tools": {"listChanged": True}},
-                "serverInfo": {"name": "CraftAnything-OmniFoundry", "version": "1.3.0"},
+                "serverInfo": {"name": "CraftAnything-OmniFoundry", "version": "1.4.0"},
             },
         }
 
@@ -1544,7 +1584,7 @@ def start_cloud_server(port: int, work_dir: Path) -> None:
 
     srv = ThreadedTCPServer(("0.0.0.0", port), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print(f"[+] Craft-Anything v1.3 Omni-Foundry MCP Server listening on 0.0.0.0:{port}/mcp", flush=True)
+    print(f"[+] Craft-Anything v1.4 Omni-Foundry MCP Server listening on 0.0.0.0:{port}/mcp", flush=True)
 
     cf_bin = shutil.which("cloudflared")
     if not cf_bin and platform.system().lower() == "linux":
@@ -1592,7 +1632,7 @@ def start_cloud_server(port: int, work_dir: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Craft-Anything v1.3 Omni-Foundry - 24/7 Cloud MCP Server & Auto-Provisioner")
+    parser = argparse.ArgumentParser(description="Craft-Anything v1.4 Omni-Foundry - 24/7 Cloud MCP Server & Auto-Provisioner")
     parser.add_argument("--forever", action="store_true", help="Auto-provision 24/7 GitHub Cloud Relay + Edge-Smart Permanent Cloudflare Worker URL")
     parser.add_argument("--port", type=int, default=7860, help="HTTP port for MCP server (default 7860)")
     parser.add_argument("--self-test", action="store_true", help="Run offline deterministic self-test of the 17 toolsets and JSON-RPC handler")
@@ -1608,7 +1648,7 @@ def main() -> int:
         worker_js = build_permanent_cloudflare_worker_js("alisyyed", "craft-anything-mcp-omni-cloud")
         assert "handleEdgeFallbackJsonRpc" in worker_js
         print(json.dumps({
-            "self_test": "PASSED_V1_3_EDGE_SMART",
+            "self_test": "PASSED_V1_4_EDGE_SMART",
             "server_info": init_res["result"]["serverInfo"],
             "curated_mcp_tools_count": len(list_res["result"]["tools"]),
             "total_toolsets": len(CRAFT_TOOLSETS),
@@ -1619,7 +1659,7 @@ def main() -> int:
     if args.forever:
         res = run_forever_provisioner(Path.cwd())
         print("\n" + "=" * 82)
-        print("  CRAFT-ANYTHING 24/7 CLOUD PROVISIONER RESULT (v1.3 EDGE-SMART)")
+        print("  CRAFT-ANYTHING 24/7 CLOUD PROVISIONER RESULT (v1.4 EDGE-SMART)")
         print("=" * 82)
         print(json.dumps(res, indent=2))
         print("=" * 82)
