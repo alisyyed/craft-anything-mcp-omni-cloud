@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: craft-anything-perpetual-relay
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   craft-anything-cloud:
@@ -25,14 +25,13 @@ jobs:
 
       - name: 2. Boot Craft-Anything Cloud MCP Tunnel First & Publish LIVE_MCP_URL.json (~15s)
         run: |
+          rm -f /tmp/LIVE_MCP_URL.json
           nohup python3 -u craft_anything_mcp_cloud_launcher.py --port 7860 > /tmp/craft_omni.log 2>&1 &
-          echo "Waiting for Cloudflare Quick Tunnel to publish URL..."
+          echo "Waiting for Python launcher to write verified https://*.trycloudflare.com URL to /tmp/LIVE_MCP_URL.json..."
           for i in $(seq 1 60); do
-            if grep -qE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/craft_omni.log; then
-              BASE_URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/craft_omni.log | head -n 1)
-              MCP_URL="${BASE_URL}/mcp"
-              GUI_URL="${BASE_URL}/"
-              printf '{"status":"LIVE","engine":"storytold/craft-anything","mcp_url":"%s","gui_url":"%s","updated_at":"%s"}\n' "$MCP_URL" "$GUI_URL" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > LIVE_MCP_URL.json
+            if [ -s /tmp/LIVE_MCP_URL.json ] && grep -q "https://" /tmp/LIVE_MCP_URL.json; then
+              cp /tmp/LIVE_MCP_URL.json LIVE_MCP_URL.json
+              cat LIVE_MCP_URL.json
               git config user.name "craft-anything-cloud-bot"
               git config user.email "bot@users.noreply.github.com"
               git add LIVE_MCP_URL.json
@@ -54,12 +53,8 @@ jobs:
           sleep 18000
 
       - name: 5. Perpetual Self-Respawn
-        if: always()
+        if: success() || failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -sS -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/craft_anything_mcp_cloud.yml/dispatches" \
-            -d '{"ref":"main"}' || true
+          curl -sS -X POST             -H "Authorization: Bearer ${GH_TOKEN}"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/craft_anything_mcp_cloud.yml/dispatches"             -d '{"ref":"main"}' || true
