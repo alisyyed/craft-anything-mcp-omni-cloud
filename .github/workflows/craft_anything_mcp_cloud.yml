@@ -23,16 +23,11 @@ jobs:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Install Companion Inspection Tools (Chromium, Rizin, TShark, Sqlite3)
+      - name: 2. Boot Craft-Anything Cloud MCP Tunnel First & Publish LIVE_MCP_URL.json (~15s)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq chromium-browser tshark sqlite3 binutils unzip curl || true
-
-      - name: 3. Boot Craft-Anything 24/7 Cloud MCP Server & Publish LIVE_MCP_URL.json
-        run: |
-          nohup python3 craft_anything_mcp_cloud_launcher.py --port 7860 > /tmp/craft_omni.log 2>&1 &
-          echo "Waiting for Craft Anything v0.6.0 + Cloudflare Tunnel to publish URL..."
-          for i in $(seq 1 90); do
+          nohup python3 -u craft_anything_mcp_cloud_launcher.py --port 7860 > /tmp/craft_omni.log 2>&1 &
+          echo "Waiting for Cloudflare Quick Tunnel to publish URL..."
+          for i in $(seq 1 60); do
             if grep -q "trycloudflare.com" /tmp/craft_omni.log; then
               BASE_URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /tmp/craft_omni.log | head -n 1)
               MCP_URL="${BASE_URL}/mcp"
@@ -45,9 +40,14 @@ jobs:
               git push || true
               break
             fi
-            sleep 3
+            sleep 2
           done
           cat /tmp/craft_omni.log
+
+      - name: 3. Install Optional Companion Packages Non-Interactively in Background
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 binutils unzip curl || true
 
       - name: 4. Keep Server Online (5-Hour Relay Window)
         run: |
